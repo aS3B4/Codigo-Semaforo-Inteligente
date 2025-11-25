@@ -1,0 +1,188 @@
+// Definición de Pines de la ESP32
+const int PIN_ROJO = 21; // LED Rojo
+const int PIN_VERDE = 5; // LED Verde
+const int PIN_AMARILLO = 22; // LED Amarillo
+const int PIN_ZUMBADOR = 19; // Zumbador (Buzzer)
+const int PIN_SENSOR = 18; // Sensor KY-032 (Pin de Señal S/OUT)
+
+// Tiempos del Semáforo (en milisegundos)
+const long TIEMPO_ROJO = 8000; // 8 segundos
+const long TIEMPO_VERDE = 6000; // 6 segundos
+const long TIEMPO_AMARILLO = 2000; // 2 segundos
+
+// Variables para la lógica del Sensor
+// Si tu sensor detecta con LOW, usa LOW. Si detecta con HIGH, usa HIGH.
+const int SENSOR_UMBRAL = LOW;
+
+// Variables de Estado
+enum EstadoSemaforo { ROJO, AMARILLO, VERDE, ROJO_PEATON, AMARILLO_PEATON };
+EstadoSemaforo estadoActual = ROJO;
+unsigned long tiempoCambioEstado = 0;
+
+// Variables para el sensor y reporte
+unsigned long ultimoReporteSensor = 0;
+const long INTERVALO_REPORTE = 500; // Imprimir el estado del sensor cada 500ms
+bool objetoDetectado = false; // Bandera global para el estado actual del sensor
+
+// --- Prototipos de Funciones ---
+void establecerEstado(EstadoSemaforo nuevoEstado);
+void gestionarSensor();
+void gestionarRojo();
+void gestionarVerde();
+void gestionarAmarillo();
+void gestionarRojoPeaton();
+void gestionarAmarilloPeaton();
+
+// --- Configuración Inicial ---
+
+void setup() {
+pinMode(PIN_ROJO, OUTPUT);
+pinMode(PIN_VERDE, OUTPUT);
+pinMode(PIN_AMARILLO, OUTPUT);
+pinMode(PIN_ZUMBADOR, OUTPUT);
+pinMode(PIN_SENSOR, INPUT);
+
+Serial.begin(115200);
+Serial.println("Semaforo ESP32 Iniciado con lógica separada.");
+
+establecerEstado(ROJO);
+}
+
+// --- Bucle Principal ---
+
+void loop() {
+// 1. Siempre gestionar la lectura y reporte del sensor (debe ser la primera tarea)
+gestionarSensor();
+
+// 2. Gestionar la lógica del estado actual
+switch (estadoActual) {
+case ROJO:
+gestionarRojo();
+break;
+case VERDE:
+gestionarVerde();
+break;
+case AMARILLO:
+gestionarAmarillo();
+break;
+case ROJO_PEATON:
+gestionarRojoPeaton();
+break;
+case AMARILLO_PEATON:
+gestionarAmarilloPeaton();
+break;
+}
+
+// Pequeña pausa
+delay(10);
+}
+
+// --- Funciones de Gestión de Estados ---
+
+/**
+* Función para establecer el estado del semáforo.
+*/
+void establecerEstado(EstadoSemaforo nuevoEstado) {
+estadoActual = nuevoEstado;
+tiempoCambioEstado = millis();
+
+// Apagar todos los LEDs por defecto
+digitalWrite(PIN_ROJO, LOW);
+digitalWrite(PIN_AMARILLO, LOW);
+digitalWrite(PIN_VERDE, LOW);
+
+switch (estadoActual) {
+case ROJO:
+digitalWrite(PIN_ROJO, HIGH);
+digitalWrite(PIN_ZUMBADOR, HIGH);
+Serial.println("ESTADO: ROJO");
+break;
+
+case VERDE:
+digitalWrite(PIN_VERDE, HIGH);
+digitalWrite(PIN_ZUMBADOR, LOW);
+Serial.println("ESTADO: VERDE");
+break;
+
+case AMARILLO:
+case AMARILLO_PEATON:
+digitalWrite(PIN_AMARILLO, HIGH);
+digitalWrite(PIN_ZUMBADOR, LOW);
+Serial.print("ESTADO: AMARILLO (");
+Serial.print(nuevoEstado == AMARILLO ? "NORMAL" : "PEATON");
+Serial.println(")");
+break;
+
+case ROJO_PEATON:
+digitalWrite(PIN_ROJO, HIGH);
+digitalWrite(PIN_ZUMBADOR, HIGH);
+Serial.println("ESTADO: ROJO PEATON (Por Sensor)");
+break;
+}
+}
+
+// --- Funciones de Lógica por Estado ---
+
+void gestionarRojo() {
+if (millis() - tiempoCambioEstado >= TIEMPO_ROJO) {
+establecerEstado(VERDE);
+}
+}
+
+void gestionarVerde() {
+unsigned long tiempoActual = millis();
+
+// Lógica de detección inmediata: CAMBIO REQUERIDO
+if (objetoDetectado) {
+// Si el sensor detecta algo, inmediatamente va a la transición
+Serial.println("--> Objeto detectado. CAMBIO INMEDIATO a AMARILLO PEATON.");
+establecerEstado(AMARILLO_PEATON);
+return; // Salir para no procesar el tiempo normal
+}
+
+// Transición normal por tiempo
+if (tiempoActual - tiempoCambioEstado >= TIEMPO_VERDE) {
+establecerEstado(AMARILLO);
+}
+}
+
+void gestionarAmarillo() {
+if (millis() - tiempoCambioEstado >= TIEMPO_AMARILLO) {
+establecerEstado(ROJO);
+}
+}
+
+void gestionarAmarilloPeaton() {
+// Transición a Rojo Peatón después del tiempo de Amarillo
+if (millis() - tiempoCambioEstado >= TIEMPO_AMARILLO) {
+establecerEstado(ROJO_PEATON);
+}
+}
+
+void gestionarRojoPeaton() {
+// Se mantiene ROJO_PEATON hasta que el objeto se vaya
+if (!objetoDetectado) {
+establecerEstado(ROJO); // Vuelve al ROJO normal
+Serial.println("--> Objeto removido. Volviendo al ciclo normal (ROJO).");
+}
+}
+
+// --- Función de Sensor y Reporte ---
+
+void gestionarSensor() {
+unsigned long tiempoActual = millis();
+
+// Leer el estado del sensor y actualizar la bandera global
+int valorSensor = digitalRead(PIN_SENSOR);
+objetoDetectado = (valorSensor == SENSOR_UMBRAL);
+
+// IMPRESIÓN SERIAL DEL SENSOR (Solo si ha pasado el intervalo)
+if (tiempoActual - ultimoReporteSensor >= INTERVALO_REPORTE) {
+if (objetoDetectado) {
+Serial.println("SENSOR: ¡OBJETO DETECTADO!");
+} else {
+Serial.println("SENSOR: No hay objeto.");
+}
+ultimoReporteSensor = tiempoActual;
+}
+}
